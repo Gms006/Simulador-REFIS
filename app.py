@@ -545,10 +545,18 @@ def render_html_report(empresa: str, itens_df: pd.DataFrame, grupos_df: pd.DataF
     th,td{border:1px solid var(--border);padding:.75rem;font-size:.875rem}
     th{background:#f8fafc;font-weight:600} tr:nth-child(even){background:#f8fafc}
     .tag{display:inline-block;padding:.25rem .75rem;border-radius:9999px;font-size:.75rem;font-weight:500;background:#eef2ff;color:var(--primary)}
+    .badge{display:inline-flex;align-items:center;padding:.15rem .5rem;border-radius:9999px;font-size:.7rem;font-weight:600;margin-left:.5rem}
+    .badge-best{background:#dcfce7;color:#166534}
     h1,h2,h3{color:var(--primary);margin:0 0 1rem}.muted{color:var(--muted)}.right{text-align:right}
     @media print{body{padding:0}.card{box-shadow:none;border:1px solid var(--border)}}
     </style>"""
     fmt = lambda v: f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X",".")
+    def fmt_money(v):
+        if v is None:
+            return "—"
+        if isinstance(v, float) and not pd.notna(v):
+            return "—"
+        return fmt(v)
     def itens_rows(df):
         if df.empty: return "<tr><td colspan='11' class='muted'>Nenhum débito adicionado.</td></tr>"
         out=[]
@@ -562,26 +570,110 @@ def render_html_report(empresa: str, itens_df: pd.DataFrame, grupos_df: pd.DataF
               f"<td class='right'>{fmt(getattr(r,'DemaisParcelas',0)) if r.Opcao=='Parcelado' else '—'}</td></tr>")
         return "".join(out)
     def grupos_rows(gdf, idf):
-        if gdf.empty: return "<tr><td colspan='12' class='muted'>Nenhum grupo salvo.</td></tr>"
-        rows=[]
+        if gdf.empty:
+            return "<tr><td colspan='11' class='muted'>Nenhum grupo salvo.</td></tr>"
+
+        def normalize_key(row):
+            key = getattr(row, "OUKeyGroup", "") or ""
+            if not key:
+                ids = list(getattr(row, "Itens", []) or [])
+                itens_df = idf[idf["UID"].isin(ids)][["Descricao", "Exercicio", "Principal"]]
+                key = ou_key_group(row.Empresa, row.Perfil, row.Natureza, itens_df) if not itens_df.empty else f"{row.Empresa}|{row.Perfil}|{row.Natureza}|[legacy]"
+            return key
+
+        def describe_conjunto(row, key):
+            ids = list(getattr(row, "Itens", []) or [])
+            if ids:
+                subset = idf[idf["UID"].isin(ids)][["Descricao", "Exercicio"]].copy()
+                if not subset.empty:
+                    subset = subset.sort_values(by=["Exercicio", "Descricao"])
+                    labels = [f"{int(r.Exercicio)} {r.Descricao}" for r in subset.itertuples()]
+                    return " • ".join(labels)
+            if "|[" in key:
+                raw = key.split("|[", 1)[1].rstrip("]")
+                if raw:
+                    labels = []
+                    for chunk in raw.split(";"):
+                        parts = chunk.split("|")
+                        if len(parts) >= 2:
+                            labels.append(f"{parts[0]} {parts[1]}")
+                        else:
+                            labels.append(chunk)
+                    if labels:
+                        return " • ".join(labels)
+            if "|" in key:
+                tail = key.rsplit("|", 1)[-1]
+                if tail:
+                    return tail
+            return key or "—"
+
+        ou_map: Dict[str, Dict[str, dict]] = {}
+        key_cache: Dict[int, str] = {}
         for r in gdf.itertuples():
-            keyg = getattr(r,"OUKeyGroup","") or ""
-            if not keyg:
-                ids = list(getattr(r,"Itens",[]) or [])
-                itens_df = idf[idf["UID"].isin(ids)][["Descricao","Exercicio","Principal"]]
-                keyg = ou_key_group(r.Empresa, r.Perfil, r.Natureza, itens_df) if not itens_df.empty else f"{r.Empresa}|{r.Perfil}|{r.Natureza}|[legacy]"
-            rows.append(dict(ID=int(getattr(r,"GroupID",0)), Natureza=r.Natureza, Op=getattr(r,"Opcao",""),
-                             Parc=int(getattr(r,"Parcelas",1)), VA=float(getattr(r,"ValorAtual",0.0)),
-                             BD=float(getattr(r,"BaseDesconto",0.0)), DP=float(getattr(r,"DescontoPct",0.0))*100,
-                             DR=float(getattr(r,"DescontoRS",0.0)), VR=float(getattr(r,"ValorRefis",0.0)),
-                             P1=float(getattr(r,"PrimeiraParcela",0.0)), DM=float(getattr(r,"DemaisParcelas",0.0)),
-                             Key=keyg))
-        return "".join([f"<tr><td>{g['ID']}</td><td>{g['Natureza']}</td><td>{g['Op']}</td><td>{g['Parc']}</td>"
-                        f"<td class='right'>{fmt(g['VA'])}</td><td class='right'>{fmt(g['BD'])}</td>"
-                        f"<td class='right'>{int(round(g['DP'],0))}%</td><td class='right'>{fmt(g['DR'])}</td>"
-                        f"<td class='right'>{fmt(g['VR'])}</td><td class='right'>{fmt(g['P1'])}</td>"
-                        f"<td class='right'>{fmt(g['DM'])}</td><td><small>{g['Key'][-32:]}</small></td></tr>"
-                        for g in rows])
+            key = normalize_key(r)
+            key_cache[r.Index] = key
+            ou_map.setdefault(key, {"avista": None, "parcelado": None})
+            raw_gid = getattr(r, "GroupID", pd.NA)
+            raw_valor = getattr(r, "ValorRefis", pd.NA)
+            valor_refis = float(raw_valor) if pd.notna(raw_valor) else None
+            pack = {
+                "GroupID": int(raw_gid) if pd.notna(raw_gid) else None,
+                "ValorRefis": valor_refis,
+                "_cmp": valor_refis if valor_refis is not None else float("inf"),
+            }
+            opt = "avista" if getattr(r, "Opcao", "") == "À vista" else "parcelado"
+            best = ou_map[key][opt]
+            if (best is None) or (pack["_cmp"] < best.get("_cmp", float("inf"))):
+                ou_map[key][opt] = pack
+
+        best_ids = set()
+        for data in ou_map.values():
+            for opt in ("avista", "parcelado"):
+                pack = data.get(opt)
+                gid = pack.get("GroupID") if pack else None
+                if gid is not None:
+                    best_ids.add(gid)
+
+        rows = []
+        for r in gdf.itertuples():
+            gid_raw = getattr(r, "GroupID", pd.NA)
+            gid = int(gid_raw) if pd.notna(gid_raw) else None
+            key = key_cache.get(r.Index, normalize_key(r))
+            conjunto = describe_conjunto(r, key)
+            opcao_txt = r.Opcao
+            if gid is not None and gid in best_ids:
+                opcao_txt = f"{opcao_txt} <span class='badge badge-best'>Melhor cenário</span>"
+
+            parcelas = "—"
+            raw_parcelas = getattr(r, "Parcelas", pd.NA)
+            if pd.notna(raw_parcelas):
+                try:
+                    parcelas = str(int(raw_parcelas))
+                except Exception:
+                    parcelas = str(raw_parcelas)
+
+            valor_atual = fmt_money(float(r.ValorAtual)) if pd.notna(getattr(r, "ValorAtual", pd.NA)) else "—"
+            base_desc = fmt_money(float(r.BaseDesconto)) if pd.notna(getattr(r, "BaseDesconto", pd.NA)) else "—"
+            valor_refis = fmt_money(float(r.ValorRefis)) if pd.notna(getattr(r, "ValorRefis", pd.NA)) else "—"
+            desconto_pct = getattr(r, "DescontoPct", pd.NA)
+            pct_txt = f"{float(desconto_pct)*100:.0f}%" if pd.notna(desconto_pct) else "—"
+
+            primeira = "—"
+            demais = "—"
+            if getattr(r, "Opcao", "") == "Parcelado":
+                raw_primeira = getattr(r, "PrimeiraParcela", pd.NA)
+                raw_demais = getattr(r, "DemaisParcelas", pd.NA)
+                primeira = fmt_money(float(raw_primeira)) if pd.notna(raw_primeira) else "—"
+                demais = fmt_money(float(raw_demais)) if pd.notna(raw_demais) else "—"
+
+            gid_display = str(gid) if gid is not None else "—"
+            rows.append(
+                f"<tr><td>{gid_display}</td><td>{r.Natureza}</td><td>{opcao_txt}</td><td>{parcelas}</td>"
+                f"<td class='right'>{valor_atual}</td><td class='right'>{base_desc}</td><td>{pct_txt}</td>"
+                f"<td class='right'>{valor_refis}</td><td class='right'>{primeira}</td><td class='right'>{demais}</td><td>{conjunto}</td></tr>"
+            )
+
+        return "".join(rows)
     return f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">{style}
 <title>Simulação REFIS — {empresa}</title></head><body>
 <h1>Simulação REFIS</h1><div class="muted">Empresa: <strong>{empresa}</strong> • Gerado em {now}</div>
@@ -589,7 +681,7 @@ def render_html_report(empresa: str, itens_df: pd.DataFrame, grupos_df: pd.DataF
 <table><thead><tr><th>Exercício</th><th>Natureza</th><th>Descrição</th><th>Tributo</th><th>Encargos</th><th>Correção</th><th>Valor Atual</th><th>Opção</th><th>Valor pelo REFIS</th><th>1ª parcela</th><th>Demais</th></tr></thead>
 <tbody>{itens_rows(itens_df)}</tbody></table></div>
 <div class="card"><h2>Negociações em Grupo <span class="tag">grupos</span></h2>
-<table><thead><tr><th>ID</th><th>Natureza</th><th>Opção</th><th>Parcelas</th><th>Valor Atual</th><th>Base desc.</th><th>Desc. %</th><th>Desc. (R$)</th><th>Valor REFIS</th><th>1ª parcela</th><th>Demais</th><th>Conjunto</th></tr></thead>
+<table><thead><tr><th>ID</th><th>Natureza</th><th>Opção</th><th>Parcelas</th><th>Valor Atual</th><th>Base desc.</th><th>% Desc.</th><th>Valor REFIS</th><th>1ª parcela</th><th>Demais</th><th>Conjunto</th></tr></thead>
 <tbody>{grupos_rows(grupos_df, itens_df)}</tbody></table></div>
 <p class="muted">Observação: a “Correção” não integra a base de desconto. Consulte o edital/portal da Prefeitura para regras específicas.</p>
 </body></html>"""
