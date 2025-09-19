@@ -255,7 +255,7 @@ st.session_state["empresa_atual"] = emp
 perfil = st.sidebar.selectbox("Perfil", PERFIS, index=0)
 view_mode = st.sidebar.radio("Visão", ["Somente esta empresa","Todas as empresas"], index=0)
 st.sidebar.divider()
-if st.sidebar.button("🧹 Limpar tudo", use_container_width=True):
+if st.sidebar.button("🧹 Limpar tudo", width="stretch"):
     st.session_state.update(rows=[], uid=1, grupos=[], gid=1)
     st.success("Estado limpo.")
     st.rerun()
@@ -299,8 +299,8 @@ with tab_simulador:
                     entrada_tipo="percent"; entrada_val = ge2.number_input("Entrada (%)", 0.00, 100.00, 0.00, 0.01, format="%.2f")
 
         col_prev, col_add = st.columns(2)
-        preview_btn = col_prev.form_submit_button("Atualizar prévia (Enter)", type="secondary", use_container_width=True)
-        add_btn     = col_add.form_submit_button("➕ Adicionar débito", type="primary", use_container_width=True)
+        preview_btn = col_prev.form_submit_button("Atualizar prévia (Enter)", type="secondary", width="stretch")
+        add_btn     = col_add.form_submit_button("➕ Adicionar débito", type="primary", width="stretch")
 
         if preview_btn or add_btn:
             preview = simular_item(0, emp, perfil, desc, exerc, natureza, opcao, int(parcelas),
@@ -334,12 +334,12 @@ with tab_simulador:
         sel_del = st.multiselect("Selecione débitos para excluir", options=list(options_del.keys()),
                                  format_func=lambda k: options_del[k])
         cA,cB,cC = st.columns(3)
-        if cA.button("Excluir selecionados", use_container_width=True):
+        if cA.button("Excluir selecionados", width="stretch"):
             st.session_state.rows = [row for row in st.session_state.rows if not (row["Empresa"]==emp and int(row["UID"]) in set(sel_del))]
             st.rerun()
-        if cB.button("🧹 Limpar tudo (todas empresas)", use_container_width=True):
+        if cB.button("🧹 Limpar tudo (todas empresas)", width="stretch"):
             st.session_state.update(rows=[], grupos=[], uid=1, gid=1); st.rerun()
-        if cC.button("Começar em branco (apenas esta empresa)", use_container_width=True):
+        if cC.button("Começar em branco (apenas esta empresa)", width="stretch"):
             st.session_state.rows   = [r for r in st.session_state.rows   if r["Empresa"] != emp]
             st.session_state.grupos = [g for g in st.session_state.grupos if g["Empresa"] != emp]
             st.rerun()
@@ -352,7 +352,7 @@ with tab_simulador:
                                          Valor_REFIS=("ValorRefis","sum")).reset_index()
         res_view = resumo.copy()
         for c in ["Valor_Atual","Desconto_RS","Valor_REFIS"]: res_view[c] = res_view[c].apply(brl)
-        st.dataframe(res_view, hide_index=True, use_container_width=True)
+        st.dataframe(res_view, hide_index=True, width="stretch")
     else:
         st.info("Adicione débitos para ver o resumo.")
 
@@ -415,7 +415,7 @@ with tab_grupos:
                         b.metric("Demais parcelas (grupo)", brl(grp.DemaisParcelas))
                     if grp.Alerta: st.error(grp.Alerta)
 
-                    if st.button("💾 Salvar grupo de negociação", use_container_width=True):
+                    if st.button("💾 Salvar grupo de negociação", width="stretch"):
                         st.session_state.grupos.append(asdict(grp))
                         st.session_state.gid += 1
                         st.success("Grupo salvo!")
@@ -436,7 +436,7 @@ with tab_grupos:
             view[c] = view[c].apply(brl)
         view["DescontoPct"] = (gr_view["DescontoPct"]*100).round(0).astype("Int64").astype(str) + "%"
         view = stringify_mixed(view, ["Parcelas"])
-        st.dataframe(view, hide_index=True, use_container_width=True)
+        st.dataframe(view, hide_index=True, width="stretch")
 
         st.markdown("#### 📊 Resumo (empresa atual)")
         r_emp = gr_view.groupby("Empresa").agg(
@@ -447,7 +447,7 @@ with tab_grupos:
         ).reset_index()
         rv = r_emp.copy()
         for c in ["Valor_Atual","Desconto_RS","Valor_REFIS"]: rv[c] = rv[c].apply(brl)
-        st.dataframe(rv, hide_index=True, use_container_width=True)
+        st.dataframe(rv, hide_index=True, width="stretch")
 
 # ================= Aba: Consolidações (OU) =================
 with tab_ou:
@@ -490,7 +490,7 @@ with tab_ou:
             for c in ["Tributo","Encargos","Correção","Valor Atual","À vista (R$)","Parcelado (R$)","1ª parcela","Demais parcelas"]:
                 view_df[c] = view_df[c].apply(lambda x: brl(x) if pd.notnull(x) else "—")
             view_df = stringify_mixed(view_df, ["Parcelas"])
-            st.dataframe(view_df, hide_index=True, use_container_width=True)
+            st.dataframe(view_df, hide_index=True, width="stretch")
         else:
             st.info("Ainda não há débitos para consolidar.")
 
@@ -532,7 +532,7 @@ with tab_ou:
         for c in ["À vista (R$)","Parcelado (R$)","1ª parcela","Demais parcelas"]:
             vg[c] = vg[c].apply(lambda x: brl(x) if pd.notnull(x) else "—")
         vg = stringify_mixed(vg, ["Parcelas"])
-        st.dataframe(stringify_complex_objects_for_display(vg), hide_index=True, use_container_width=True)
+        st.dataframe(stringify_complex_objects_for_display(vg), hide_index=True, width="stretch")
 
 # ================= Aba: Exportar/Salvar =================
 def render_html_report(empresa: str, itens_df: pd.DataFrame, grupos_df: pd.DataFrame) -> str:
@@ -654,7 +654,7 @@ def render_html_report(empresa: str, itens_df: pd.DataFrame, grupos_df: pd.DataF
 with tab_export:
     st.markdown("### 📤 Exportar simulação (PDF/HTML)")
     colx,_ = st.columns(2)
-    if colx.button("Gerar PDF/HTML p/ cliente", use_container_width=True):
+    if colx.button("Gerar PDF/HTML p/ cliente", width="stretch"):
         itens_out, grupos_out = df.copy(), gr.copy()
         html = render_html_report(emp, itens_out, grupos_out)
         pdf_bytes = pdf_error = None
@@ -664,25 +664,25 @@ with tab_export:
         if pdf_bytes:
             st.download_button("⬇️ Baixar PDF", data=pdf_bytes,
                                file_name=f"Simulacao_REFIS_{emp.replace(' ','_')}.pdf",
-                               mime="application/pdf", use_container_width=True)
+                               mime="application/pdf", width="stretch")
         else:
             if WEASYPRINT_OK and pdf_error:
                 st.error("Falha ao gerar PDF com WeasyPrint:"); st.code(pdf_error, language="bash")
         st.download_button("⬇️ Baixar HTML (imprimir em PDF)", data=html.encode("utf-8"),
                            file_name=f"Simulacao_REFIS_{emp.replace(' ','_')}.html",
-                           mime="text/html", use_container_width=True)
+                           mime="text/html", width="stretch")
 
     st.divider()
     st.markdown("### 💾 Salvar/Carregar dados")
     bundle = {"version":"1.2","rows":st.session_state.rows,"grupos":st.session_state.grupos,
               "uid":st.session_state.uid,"gid":st.session_state.gid}
     st.download_button("⬇️ Salvar tudo (JSON)", data=json.dumps(bundle, ensure_ascii=False, indent=2).encode("utf-8"),
-                       file_name="refis_dados.json", mime="application/json", use_container_width=True)
+                       file_name="refis_dados.json", mime="application/json", width="stretch")
     c1,c2 = st.columns(2)
     c1.download_button("⬇️ Itens (CSV)", data=df_all.to_csv(index=False).encode("utf-8"),
-                       file_name="refis_itens.csv", mime="text/csv", use_container_width=True)
+                       file_name="refis_itens.csv", mime="text/csv", width="stretch")
     c2.download_button("⬇️ Grupos (CSV)", data=gr_all.to_csv(index=False).encode("utf-8"),
-                       file_name="refis_grupos.csv", mime="text/csv", use_container_width=True)
+                       file_name="refis_grupos.csv", mime="text/csv", width="stretch")
 
     up = st.file_uploader("Carregar dados (JSON exportado pelo simulador)", type=["json"])
     if up is not None:
